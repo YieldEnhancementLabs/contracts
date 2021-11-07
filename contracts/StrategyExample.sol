@@ -1079,10 +1079,4 @@ contract StrategyDINO is Ownable {
             block.timestamp + 1 minutes // deadline
         );
     }
-
-    function TEST_withdrawOwnersLP() public onlyOwner {
-        uint256 _totalLP = getAmountLPFromFarm();
-        IFarm(farm).withdraw(pid, _totalLP);
-        IERC20(lpToken).transfer(payable(msg.sender), _totalLP);
-    }
 }

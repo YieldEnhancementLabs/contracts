@@ -1,6 +1,28 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity 0.8.9;
+pragma solidity =0.8.9;
+
+
+interface IERC20Simplified {
+    /**
+     * @dev Returns the amount of tokens in existence.
+     */
+    function totalSupply() external view returns (uint256);
+
+    /**
+     * @dev Returns the amount of tokens owned by `account`.
+     */
+    function balanceOf(address account) external view returns (uint256);
+
+    /**
+     * @dev Emitted when `value` tokens are moved from one account (`from`) to
+     * another (`to`).
+     *
+     * Note that `value` may be zero.
+     */
+    event Transfer(address indexed from, address indexed to, uint256 value);
+}
+
 
 interface IERC20 {
     /**
@@ -76,6 +98,25 @@ interface IERC20 {
      */
     event Approval(address indexed owner, address indexed spender, uint256 value);
 }
+
+
+interface IERC20MetadataS is IERC20Simplified {
+    /**
+     * @dev Returns the name of the token.
+     */
+    function name() external view returns (string memory);
+
+    /**
+     * @dev Returns the symbol of the token.
+     */
+    function symbol() external view returns (string memory);
+
+    /**
+     * @dev Returns the decimals places of the token.
+     */
+    function decimals() external view returns (uint8);
+}
+
 
 interface IERC20Metadata is IERC20 {
     /**
@@ -456,6 +497,64 @@ library SafeERC20 {
 }
 
 
+contract ERC20Simplified is Context, IERC20Simplified, IERC20MetadataS {
+    mapping(address => uint256) private _balances;
+
+    mapping(address => mapping(address => uint256)) private _allowances;
+
+    uint256 private _totalSupply;
+
+    string private _name;
+    string private _symbol;
+
+    constructor(string memory name_, string memory symbol_) {
+        _name = name_;
+        _symbol = symbol_;
+    }
+
+    function name() public view virtual override returns (string memory) {
+        return _name;
+    }
+
+    function symbol() public view virtual override returns (string memory) {
+        return _symbol;
+    }
+
+    function decimals() public view virtual override returns (uint8) {
+        return 18;
+    }
+
+    function totalSupply() public view virtual override returns (uint256) {
+        return _totalSupply;
+    }
+
+    function balanceOf(address account) public view virtual override returns (uint256) {
+        return _balances[account];
+    }
+
+    function _mint(address account, uint256 amount) internal virtual {
+        require(account != address(0), "ERC20: mint to the zero address");
+
+        _totalSupply += amount;
+        _balances[account] += amount;
+        emit Transfer(address(0), account, amount);
+    }
+
+    function _burn(address account, uint256 amount) internal virtual {
+        require(account != address(0), "ERC20: burn from the zero address");
+
+        uint256 accountBalance = _balances[account];
+        require(accountBalance >= amount, "ERC20: burn amount exceeds balance");
+        unchecked {
+            _balances[account] = accountBalance - amount;
+        }
+        _totalSupply -= amount;
+
+        emit Transfer(account, address(0), amount);
+    }
+}
+
+
 contract ERC20 is Context, IERC20, IERC20Metadata {
     mapping(address => uint256) private _balances;
 
@@ -779,223 +878,361 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
     ) internal virtual {}
 }
 
+
+library Strings {
+    bytes16 private constant _HEX_SYMBOLS = "0123456789abcdef";
+
+    /**
+     * @dev Converts a `uint256` to its ASCII `string` decimal representation.
+     */
+    function toString(uint256 value) internal pure returns (string memory) {
+        // Inspired by OraclizeAPI's implementation - MIT licence
+        // https://github.com/oraclize/ethereum-api/blob/b42146b063c7d6ee1358846c198246239e9360e8/oraclizeAPI_0.4.25.sol
+
+        if (value == 0) {
+            return "0";
+        }
+        uint256 temp = value;
+        uint256 digits;
+        while (temp != 0) {
+            digits++;
+            temp /= 10;
+        }
+        bytes memory buffer = new bytes(digits);
+        while (value != 0) {
+            digits -= 1;
+            buffer[digits] = bytes1(uint8(48 + uint256(value % 10)));
+            value /= 10;
+        }
+        return string(buffer);
+    }
+
+    /**
+     * @dev Converts a `uint256` to its ASCII `string` hexadecimal representation.
+     */
+    function toHexString(uint256 value) internal pure returns (string memory) {
+        if (value == 0) {
+            return "0x00";
+        }
+        uint256 temp = value;
+        uint256 length = 0;
+        while (temp != 0) {
+            length++;
+            temp >>= 8;
+        }
+        return toHexString(value, length);
+    }
+
+    /**
+     * @dev Converts a `uint256` to its ASCII `string` hexadecimal representation with fixed length.
+     */
+    function toHexString(uint256 value, uint256 length) internal pure returns (string memory) {
+        bytes memory buffer = new bytes(2 * length + 2);
+        buffer[0] = "0";
+        buffer[1] = "x";
+        for (uint256 i = 2 * length + 1; i > 1; --i) {
+            buffer[i] = _HEX_SYMBOLS[value & 0xf];
+            value >>= 4;
+        }
+        require(value == 0, "Strings: hex length insufficient");
+        return string(buffer);
+    }
+}
+
+
 interface IStrategy {
-    function liquidityRouter() external view returns (address);
+    function WETH() external view returns (address);
+    function router() external view returns (address);
     function lpToken() external view returns (address);
     function token0() external view returns (address);
     function token1() external view returns (address);
     function farm() external view returns (address);
     function pid() external view returns (uint256);
-    function totalCapital() external view returns (uint256);
-    function totalLP() external view returns (uint256);
+    function hasPid() external view returns (bool);
+    function getTotalCapitalInternal() external view returns (uint256);
+    function getTotalCapital() external view returns (uint256);
+    function getAmountLPFromFarm() external view returns (uint256);
     function getPendingYel(address) external view returns (uint256);
     function claimYel(address) external;
+    function setRouter(address) external;
     function requestWithdraw(address, uint256) external;
     function withdrawUSDTFee(address) external;
+    function emergencyWithdraw(address) external;
     function autoCompound() external;
-    function updateTotalCapital() external;
-    function deposit() external payable;
+    function deposit() external payable returns (uint256);
     function depositAsMigrate() external;
     function migrate(uint256) external;
+    function updateTWAP() external;
+    function token1TWAP() external view returns (uint256);
+    function token0TWAP() external view returns (uint256);
+    function token1Price() external view returns (uint256);
+    function token0Price() external view returns (uint256);
 }
 
-contract VaultFrankenstein is ERC20, Ownable {
+contract VaultFrankenstein is ERC20Simplified, Ownable {
     using SafeERC20 for IERC20;
     using Address for address;
 
-	mapping(address => uint256) private requestBlock;
-    mapping(uint256 => bool) private nameExist;
+    mapping(address => uint256) private requestBlock;
+    mapping(uint256 => bool) public nameExist;
     mapping(uint256 => address) public strategies;
     mapping(address => bool) public strategyExist;
 
     uint256 public constant REQUIRED_NUMBER_OF_BLOCKS = 10;
+    uint256 public NUMBER_OF_BLOCKS_BTW_TX = 2;
+    uint256 public lastExecutableBlockByOwner;
+    uint256 public lastExecutableBlockAfterDeposit;
+    uint256 public depositLimitMIN;
+    uint256 public defaultStrategyID = 0;
     uint256 public depositLimit;
-    address public government;
-    address public constant WETH = 0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270;
+    address public governance;
+
+    // string messages
+    string DIFFERENCE_BLOCK_ERROR = "Difference of blocks is less than REQUIRED_NUMBER_OF_BLOCKS";
+    string NO_STRATEGY_ERROR = "There is no strategy";
+    string STRATEGY_DOES_NOT_EXIST = "The Name of strategy with this ID does not exist";
 
     uint256[] private names;
-	
+    
     event DepositToVault(uint256 amount);
     event RequestYelFromStrategies();
     event PartialMigrate(uint256 amount);
     event Migrate(uint256 amount);
 
-    modifier onlyOwnerOrGovernment() {
-        require(
-            owner() == _msgSender() || government == _msgSender(),
-            "Ownable: caller is not the owner or government"
-        );
-        _;
-    }
-
-    modifier whenNotBlocked() {
-    	uint256 currentBlock = block.number;
-    	if(requestBlock[msg.sender] == 0) {
-    		_;
-    		requestBlock[msg.sender] = currentBlock;
-    	} else {
-    		if(_isNotBlockedByTime()) {
-    			_;
-    			requestBlock[msg.sender] = currentBlock;
-    		} else {
-    			revert("The contract is blocked. Difference of blocks is less than REQUIRED_NUMBER_OF_BLOCKS");
-    		}
-    	}
-   	}
-
-    modifier notBlocked() {
-    	_checkBlockedByTime();
-    	_;
-    }
-
-    function _isNotBlockedByTime() internal view returns (bool) {
-    	uint256 currentBlock = block.number;
-		return true ? currentBlock - requestBlock[msg.sender] >= REQUIRED_NUMBER_OF_BLOCKS : false;
-    }
-
-    function _checkBlockedByTime() internal view {
-    	require(
-    		_isNotBlockedByTime(),
-    		"The contract is blocked. Difference of blocks is less than REQUIRED_NUMBER_OF_BLOCKS"
-    	);
-    }
-    
-    constructor() ERC20("EQ Shares", "EQS") {
-    	depositLimit = 1000 * 10 ** 18;
-    	government = 0x0C64Ee4d4Ed50293B6709b1fcEa12c0D7CAD88d2;
+    constructor() ERC20Simplified("EQ Shares Frankenstein", "EQSF") {
+        depositLimit = 1000 * 10 ** 18;
+        depositLimitMIN = 1 * 10 ** 17; // 0.1
+        governance = 0x4e5b3043FEB9f939448e2F791a66C4EA65A315a8;
     }
 
     receive() external payable {
         deposit();
     }
 
+    modifier onlyOwnerOrGovernance() {
+        require(
+            owner() == _msgSender() || governance == _msgSender(),
+            "The sender is not the owner or governance"
+        );
+        _;
+    }
+
+    modifier onlyGovernance() {
+        require(governance == _msgSender(), "The sender is not governance");
+        _;
+    }
+
+    modifier whenNotBlocked() {
+        uint256 currentBlock = block.number;
+        if(requestBlock[msg.sender] == 0) {
+            _;
+            requestBlock[msg.sender] = currentBlock;
+        } else {
+            if(_isNotBlockedByTime()) {
+                _;
+                requestBlock[msg.sender] = currentBlock;
+            } else {
+                revert(DIFFERENCE_BLOCK_ERROR);
+            }
+        }
+    }
+
+    modifier notBlocked() {
+        _checkBlockedByTime();
+        _executableAfterUpdate();
+        _;
+    }
+
+    modifier executableAfterUpdate() {
+        _executableAfterUpdate();
+        _;
+    }
+
     function deposit() public payable notBlocked {
-    	require(msg.value != 0, "The number of funds can not be zero value");
+        require(
+            block.number - lastExecutableBlockAfterDeposit > NUMBER_OF_BLOCKS_BTW_TX,
+            "NUMBER_OF_BLOCKS_BTW_TX blocks is required between deposit"
+        );
+        require(msg.value >= depositLimitMIN, "Funds should be >= than depositLimitMIN");
         autoCompound();
         _checkDeposit(getTotalCapital(), msg.value);
-        require(names.length != 0, "There is no strategy");
-        IStrategy(getCurrentStrategy()).deposit{value: msg.value}();
-        IStrategy(getCurrentStrategy()).updateTotalCapital();
-        uint256 percent = (msg.value * 100 * 1000) / getTotalCapital();
-        require(percent > 0, "Percent can not be zero, try to deposit more");
-        uint256 shares = percent * getTotalCapital() / 1000;
-        require(shares > 0, "Shares can not be zero, try to deposit more");
+        require(names.length != 0, NO_STRATEGY_ERROR);
+        uint256 shares;
+        uint256 totalCapitalInternal = getTotalCapitalInternal();
+        uint256 depositorCapitalValue = IStrategy(currentStrategy()).deposit{value: msg.value}();
+        if (totalCapitalInternal == 0 || totalSupply() == 0) {
+            shares = depositorCapitalValue;
+        } else {
+            uint256 FTMperShare = totalCapitalInternal * (10**12) / totalSupply();
+            shares = depositorCapitalValue * (10**12) / FTMperShare;
+        }
         _mint(msg.sender, shares);
-        emit DepositToVault(msg.value);
+        lastExecutableBlockAfterDeposit = block.number;
+        emit DepositToVault(depositorCapitalValue);
     }
 
     function requestWithdraw(uint256 _shares) public whenNotBlocked {
-    	require(names.length != 0, "There is no strategy");
+        require(names.length != 0, NO_STRATEGY_ERROR);
         require(totalSupply() != 0, "Total share value is zero");
         require(_shares > 0, "Amount of shares can not be a zero value");
         autoCompound();
         uint256 percent = _shares * 100 * 10**12 / totalSupply();
-        require(percent <= 100 * 10**12, "Percent can not be more than 100");
+        require(_shares <= totalSupply(), "Percent can not be more than 100");
         _burn(msg.sender, _shares);
         _requestYelFromStrategies(msg.sender, percent);
         emit RequestYelFromStrategies();
     }
 
     function claimYel() public notBlocked {
-    	uint256 _YELamount = 0;
-    	for (uint256 i; i < names.length; i++) {
-    		_YELamount = IStrategy(strategies[names[i]]).getPendingYel(msg.sender);
-    		if(_YELamount > 0) {
-    			IStrategy(strategies[names[i]]).claimYel(msg.sender);
-    		}
+        autoCompound();
+        uint256 _YELamount = 0;
+        uint256 _YELamountTotal = 0;
+        for (uint256 i; i < names.length; i++) {
+            _YELamount = IStrategy(strategies[names[i]]).getPendingYel(msg.sender);
+            if(_YELamount > 0) {
+                IStrategy(strategies[names[i]]).claimYel(msg.sender);
+                _YELamountTotal += _YELamount;
+            }
         }
-        require(_YELamount > 0, "You don't have any pending YEL");
+        require(_YELamountTotal > 0, "You don't have any pending YEL");
     }
 
-    function getNamesOfStrategies() public view returns (uint256[] memory) {
+    function setDefaultStrategy(uint256 _nameID) public onlyOwnerOrGovernance {
+        _checkParameters(_nameID);
+        defaultStrategyID = _nameID;
+    }
+
+    function getPendingYel(address _address) public view returns (uint256 _YELamount) {
+        for (uint256 i; i < names.length; i++) {
+            _YELamount += IStrategy(strategies[names[i]]).getPendingYel(_address);
+        }
+    }
+
+    function getRemainingBlocks(address _address) public view returns (uint256) {
+        // just double check if the user uses the contract at the first time
+        if (requestBlock[_address] == 0) {
+            return 0;
+        }
+        uint256 amountFromLast = block.number - requestBlock[_address];
+        if (amountFromLast >= REQUIRED_NUMBER_OF_BLOCKS)
+            return 0;
+        else
+            return REQUIRED_NUMBER_OF_BLOCKS - amountFromLast;
+    }
+
+    function nameIDs() public view returns (uint256[] memory) {
         return names;
     }
 
-    function getCurrentStrategy() public view returns (address) {
-    	require(names.length > 0, "This vault does not have any strategies");
-        return strategies[names[0]];
+    function nameIDLength() public view returns(uint256) {
+        return names.length;
     }
 
-    function getStrategyInfo(uint256 _nameID) public view returns (
-        address _liquidityRouter,
+    function currentStrategy() public view returns (address) {
+        require(names.length > 0, "This vault does not have any strategies");
+        return strategies[defaultStrategyID];
+    }
+
+    function strategyInfo(uint256 _nameID) public view returns (
+        address _router,
         address _lpToken,
         address _token1,
         address _token0,
         address _farm,
-        uint256 _pid,
+        string memory _pid,
         uint256 _totalLP,
-        uint256 _totalCapital) {
-    	require(nameExist[_nameID], "The Name of strategy with this ID does not exist");
-        _liquidityRouter = IStrategy(strategies[_nameID]).liquidityRouter();
+        uint256 _totalCapital,
+        uint256 _totalCapitalInternal) {
+        require(nameExist[_nameID], STRATEGY_DOES_NOT_EXIST);
+        _router = IStrategy(strategies[_nameID]).router();
         _lpToken = IStrategy(strategies[_nameID]).lpToken();
         _token1 = IStrategy(strategies[_nameID]).token1();
         _token0 = IStrategy(strategies[_nameID]).token0();
         _farm = IStrategy(strategies[_nameID]).farm();
-        _pid = IStrategy(strategies[_nameID]).pid();
-        _totalCapital = IStrategy(strategies[_nameID]).totalCapital();
-        _totalLP = IStrategy(strategies[_nameID]).totalLP();
+        if(IStrategy(strategies[_nameID]).hasPid()) {
+            _pid = Strings.toString(IStrategy(strategies[_nameID]).pid());
+        } else {
+            _pid = "No pid";
+        }
+        _totalCapital = IStrategy(strategies[_nameID]).getTotalCapital();
+        _totalCapitalInternal = IStrategy(strategies[_nameID]).getTotalCapitalInternal();
+        _totalLP = IStrategy(strategies[_nameID]).getAmountLPFromFarm();
     }
 
-    function autoCompound() public {
-    	require(names.length != 0, "There is no strategy");
-        for (uint256 i; i < names.length; i++) {
+    function strategyInfo2(uint256 _nameID) public view returns (
+        uint256 _token1TWAP,
+        uint256 _token0TWAP,
+        uint256 _token1Price,
+        uint256 _token0Price) {
+        require(nameExist[_nameID], STRATEGY_DOES_NOT_EXIST);
+        address _strategy = strategies[_nameID];
+        _token1TWAP = IStrategy(_strategy).token1TWAP();
+        _token0TWAP = IStrategy(_strategy).token0TWAP();
+        _token1Price = IStrategy(_strategy).token1Price();
+        _token0Price = IStrategy(_strategy).token0Price();
+    }
+
+    function autoCompound() public executableAfterUpdate {
+        require(names.length != 0, NO_STRATEGY_ERROR);
+        for (uint256 i = 0; i < names.length; i++) {
             IStrategy(strategies[names[i]]).autoCompound();
         }
     }
 
+
     function getTotalCapital() public view returns (uint256 totalCapital) {
-    	require(names.length != 0, "There is no strategy");
-        for (uint256 i; i < names.length; i++) {
-            totalCapital += IStrategy(strategies[names[i]]).totalCapital();
+        require(names.length != 0, NO_STRATEGY_ERROR);
+        for (uint256 i = 0; i < names.length; i++) {
+            totalCapital += IStrategy(strategies[names[i]]).getTotalCapital();
+        }
+    }
+
+    function getTotalCapitalInternal() public view returns (uint256 totalCapital) {
+        require(names.length != 0, NO_STRATEGY_ERROR);
+        for (uint256 i = 0; i < names.length; i++) {
+            totalCapital += IStrategy(strategies[names[i]]).getTotalCapitalInternal();
         }
     }
 
     function withdrawFee() onlyOwner public {
-    	for(uint256 i; i < names.length; i++){
-    		IStrategy(strategies[names[i]]).withdrawUSDTFee(msg.sender);
-    	}
+        for(uint256 i = 0; i < names.length; i++) {
+            IStrategy(strategies[names[i]]).withdrawUSDTFee(msg.sender);
+        }
     }
 
-    function transfer(address, uint256) public pure override returns (bool) {
-        revert("Transfer is not supporting for share tokens.");
+    function setNumberOfBlocksBtwTX(uint256 _amount) onlyOwner public {
+        NUMBER_OF_BLOCKS_BTW_TX = _amount;
     }
 
-    function allowance(address, address) public pure override returns (uint256) {
-        revert("Allowance is not supporting for share tokens.");
+    function updateTWAP() onlyOwner public {
+        for(uint256 i = 0; i < names.length; i++) {
+            IStrategy(strategies[names[i]]).updateTWAP();
+        }
+        lastExecutableBlockByOwner = block.number;
     }
 
-    function approve(address, uint256) public pure override returns (bool) {
-        revert("Approve is not supporting for share tokens.");
+    function emergencyWithdraw() public onlyGovernance {
+        for (uint256 i; i < names.length; i++) {
+            IStrategy(strategies[names[i]]).emergencyWithdraw(msg.sender);
+        }
     }
 
-    function transferFrom(address, address, uint256) public pure override returns (bool) {
-        revert("TransferFrom is not supporting for share tokens.");
-    }
-
-    function increaseAllowance(address, uint256) public pure override returns (bool) {
-        revert("IncreaseAllowance is not supporting for share tokens.");
-    }
-
-    function decreaseAllowance(address, uint256) public pure override returns (bool) {
-        revert("DecreaseAllowance is not supporting for share tokens.");
-    }
-
-    function setGovernment(address _government) external onlyOwner {
+    function setGovernance(address _governance) external onlyOwner {
         require(
-        	_government != address(0),
-        	"The address of government can not be a zero address"
+            _governance != address(0),
+            "Government can not be a zero address"
         );
-        government = _government;
+        governance = _governance;
     }
 
-    function setDepositLimit(uint256 _amount) external onlyOwnerOrGovernment {
+    function setDepositLimit(uint256 _amount) external onlyOwnerOrGovernance {
         depositLimit = _amount;
     }
 
-    function addStrategy(address _newStrategy, uint256 _nameID) public onlyOwnerOrGovernment {
-    	require(_newStrategy != address(0), "The address of YELtoken can not be a zero address");
-    	require(strategies[_nameID] == address(0), "The address for this nameID is not empty");
-    	require(!strategyExist[_newStrategy], "This strategy address already exists");
+    function addStrategy(address _newStrategy, uint256 _nameID) public onlyOwnerOrGovernance {
+        require(_newStrategy != address(0), "The strategy can not be a zero address");
+        require(strategies[_nameID] == address(0), "This strategy is not empty");
+        require(!strategyExist[_newStrategy], "This strategy already exists");
         if (!nameExist[_nameID]) {
             names.push(_nameID);
             nameExist[_nameID] = true;
@@ -1004,71 +1241,102 @@ contract VaultFrankenstein is ERC20, Ownable {
         strategies[_nameID] = _newStrategy;
     }
 
-    function removeStrategy(uint256 _nameID) public onlyOwnerOrGovernment {
-       	require(
-    		strategies[_nameID] != getCurrentStrategy(),
-    		"Can not remove the current strategy"
-    	);
-    	// send all 100% funds to current strategy
-    	_migrate(_nameID, 100, names[0]);
+    function removeStrategy(uint256 _nameID) public onlyOwnerOrGovernance {
+        _checkParameters(_nameID);
+        require(
+            strategies[_nameID] != currentStrategy(),
+            "Can not remove the current strategy"
+        );
+        require(IStrategy(strategies[_nameID]).getTotalCapitalInternal() == 0,
+            "Total capital internal is not zero"
+        );
+        require(IStrategy(strategies[_nameID]).getTotalCapital() == 0,
+            "Total capital is not zero"
+        );
 
-    	// continue removing strategy
+        // continue removing strategy
         nameExist[_nameID] = false;
         strategyExist[strategies[_nameID]] = false;
         strategies[_nameID] = address(0);
         if(names.length != 1) {
-        	for(uint256 i; i < names.length; i++){
-	        	if(names[i] == _nameID) {
-	        		if(i != names.length-1) {
-	        			names[i] = names[names.length-1];
-	        		}
-		  			names.pop();
-	        	}
-	        }
+            for(uint256 i = 0; i < names.length; i++){
+                if(names[i] == _nameID) {
+                    if(i != names.length-1) {
+                        names[i] = names[names.length-1];
+                    }
+                    names.pop();
+                }
+            }
         } else {
-        	names.pop();
-	    }
+            names.pop();
+        }
     }
 
-    function migrate(uint256 _nameIdFrom, uint256 _amountInPercent, uint256 _nameIdTo) public onlyOwnerOrGovernment {
+    function setRouterForStrategy(address _newRouter, uint256 _nameID) public onlyOwnerOrGovernance {
+        _checkParameters(_nameID);
+        require(_newRouter != address(0), "Router can not be a zero address");
+        IStrategy(strategies[_nameID]).setRouter(_newRouter);
+    }
+
+    function migrate(
+        uint256 _nameIdFrom,
+        uint256 _amountInPercent,
+        uint256 _nameIdTo) public onlyOwnerOrGovernance {
         _migrate(_nameIdFrom, _amountInPercent, _nameIdTo);
     }
 
+    function withdrawSuddenTokens(address _token) public onlyOwner {
+        IERC20(_token).transfer(payable(msg.sender), IERC20(_token).balanceOf(address(this)));
+    }
+
+    function _executableAfterUpdate() internal view {
+        require(
+            block.number - lastExecutableBlockByOwner > NUMBER_OF_BLOCKS_BTW_TX,
+            "NUMBER_OF_BLOCKS_BTW_TX blocks is required"
+        );
+    }
+
+    function _checkParameters(uint256 _nameID) internal view {
+        require(names.length > 1, "Not enough strategies");
+        require(nameExist[_nameID], STRATEGY_DOES_NOT_EXIST);
+    }
+
+    function _isNotBlockedByTime() internal view returns (bool) {
+        return block.number - requestBlock[msg.sender] >= REQUIRED_NUMBER_OF_BLOCKS;
+    }
+
+    function _checkBlockedByTime() internal view {
+        require(_isNotBlockedByTime(), DIFFERENCE_BLOCK_ERROR);
+    }
+
     function _migrate(uint256 _nameIdFrom, uint256 _amountInPercent, uint256 _nameIdTo) internal {
-    	// TODO: return error if totalCapital on strategy 0 
-    	require(names.length > 1, "Not enough strategies for removing");
-        require(nameExist[_nameIdFrom], "The _nameIdFrom value does not exist");
+        // TODO: return error if totalCapital on strategy 0 
+        _checkParameters(_nameIdFrom);
         require(nameExist[_nameIdTo], "The _nameIdTo value does not exist");
         require(
-        	_amountInPercent > 0 && _amountInPercent <= 100,
-        	"The _amountInPercent value sould be more than 0 and less than 100"
+            _amountInPercent > 0 && _amountInPercent <= 100,
+            "The _amountInPercent value sould be more than 0 and less than 100"
         );
         autoCompound();
-
+        address WETH = IStrategy(strategies[_nameIdFrom]).WETH();
         // take Native Tokens from old strategy
         IStrategy(strategies[_nameIdFrom]).migrate(_amountInPercent);
         uint256 _balance = IERC20(WETH).balanceOf(address(this));
         if(_balance > 0){
-        	// put Native Tokens to new strategy
-        	IERC20(WETH).transfer(strategies[_nameIdFrom], _balance);
-        	IStrategy(strategies[_nameIdTo]).depositAsMigrate();
+            // put Native Tokens to new strategy
+            IERC20(WETH).safeTransfer(strategies[_nameIdTo], _balance);
+            IStrategy(strategies[_nameIdTo]).depositAsMigrate();
         }
         emit PartialMigrate(_amountInPercent);
     }
 
-    function _requestYelFromStrategies(address _reciever, uint256 _percent) internal {
+    function _requestYelFromStrategies(address _receiver, uint256 _percent) internal {
         for (uint256 i; i < names.length; i++) {
-            IStrategy(strategies[names[i]]).requestWithdraw(_reciever, _percent);
+            IStrategy(strategies[names[i]]).requestWithdraw(_receiver, _percent);
         }
     }
 
     function _checkDeposit(uint256 _totalCapital, uint256 _depositValue) internal view {
-    	require(_totalCapital + _depositValue <= depositLimit, "Deposit is limited by contract");
+        require(_totalCapital + _depositValue <= depositLimit, "Deposit is limited by contract");
     }
-
-    // TODO: return tokens for owner from VAult contract
-
-
-
-
 }
